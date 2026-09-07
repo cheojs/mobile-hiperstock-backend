@@ -20,13 +20,45 @@ export interface IDatabaseClient {
   close(): Promise<void>;
 }
 
+export function resolvePostgresConnectionString(rawUrl: string): { primary: string; fallback: string | null } {
+  const trimmed = rawUrl.trim();
+  const match = trimmed.match(/^postgres(?:ql)?:\/\/([^:]+):(.*)@([^@:\/]+)(?::(\d+))?\/(.+)$/);
+  if (!match) {
+    return { primary: trimmed, fallback: null };
+  }
+
+  let [, user, pass, host, port, db] = match;
+  port = port || '5432';
+
+  let safePass = pass;
+  try {
+    if (decodeURIComponent(pass) === pass) {
+      safePass = encodeURIComponent(pass);
+    }
+  } catch {
+    safePass = encodeURIComponent(pass);
+  }
+
+  const supaMatch = host.match(/^db\.([a-z0-9]+)\.supabase\.co$/);
+  if (supaMatch) {
+    const projectRef = supaMatch[1];
+    // Pooler en us-east-1 soporta IPv4 con port 5432 (Session mode)
+    const poolerUrl = `postgresql://postgres.${projectRef}:${safePass}@aws-0-us-east-1.pooler.supabase.com:5432/${db}`;
+    const directUrl = `postgresql://${user}:${safePass}@${host}:${port}/${db}`;
+    return { primary: poolerUrl, fallback: directUrl };
+  }
+
+  return { primary: `postgresql://${user}:${safePass}@${host}:${port}/${db}`, fallback: null };
+}
+
 export class PgDatabaseClient implements IDatabaseClient {
   public readonly isPostgres = true;
   private pool: pg.Pool;
 
   constructor(connectionString: string) {
+    const { primary } = resolvePostgresConnectionString(connectionString);
     this.pool = new Pool({
-      connectionString,
+      connectionString: primary,
       ssl: {
         rejectUnauthorized: false,
       },

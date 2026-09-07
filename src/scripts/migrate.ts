@@ -4,6 +4,8 @@ import pg from 'pg';
 import Database from 'better-sqlite3';
 import dotenv from 'dotenv';
 
+import { resolvePostgresConnectionString } from '../config/database.js';
+
 dotenv.config();
 
 const { Pool } = pg;
@@ -20,34 +22,73 @@ async function runMigration() {
   const sqlContent = fs.readFileSync(sqlFilePath, 'utf8');
 
   if (databaseUrl && databaseUrl.trim().length > 0) {
+    const { primary } = resolvePostgresConnectionString(databaseUrl);
+    console.log(`====================================================`);
     console.log(`[Migration] Target: PostgreSQL (Supabase / Remote)`);
-    console.log(`[Migration] Connecting with SSL (rejectUnauthorized: false)...`);
+    console.log(`[Migration] SSL Mode: { rejectUnauthorized: false }`);
+    console.log(`[Migration] Connecting to database endpoint...`);
 
     const pool = new Pool({
-      connectionString: databaseUrl.trim(),
+      connectionString: primary,
       ssl: {
         rejectUnauthorized: false,
       },
       connectionTimeoutMillis: 10000,
     });
 
-    const client = await pool.connect();
+    let client: pg.PoolClient | null = null;
     try {
-      console.log(`[Migration] Executing init-db.sql...`);
-      await client.query(sqlContent);
-      console.log(`[Migration] Tables and views verified: clients, customers, products, orders, order_items`);
+      client = await pool.connect();
+      console.log(`[Migration] Connected successfully to PostgreSQL.`);
 
-      const clientsCount = await client.query('SELECT COUNT(*) FROM clients');
-      const productsCount = await client.query('SELECT COUNT(*) FROM products');
-      console.log(`[Migration] Seed verification:`);
-      console.log(` - Total clients:  ${clientsCount.rows[0].count}`);
-      console.log(` - Total products: ${productsCount.rows[0].count}`);
-      console.log(`[Migration] SUCCESS! Remote database is fully migrated and seeded.`);
+      const versionRes = await client.query('SELECT version()');
+      console.log(`[Migration] Database Version: ${versionRes.rows[0].version}`);
+
+      console.log(`[Migration] Executing init-db.sql statements...`);
+      await client.query(sqlContent);
+      console.log(`[Migration] DDL and Seed statements applied without error.`);
+
+      // Listar tablas y vistas en el esquema public
+      const tablesRes = await client.query(`
+        SELECT table_name, table_type 
+        FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        ORDER BY table_name;
+      `);
+
+      console.log(`====================================================`);
+      console.log(`[Migration Result] Tables and Views in 'public':`);
+      for (const row of tablesRes.rows) {
+        console.log(` - ${row.table_name} (${row.table_type})`);
+      }
+
+      // Conteo de registros
+      const clientsCount = await client.query('SELECT COUNT(*) as count FROM clients');
+      const productsCount = await client.query('SELECT COUNT(*) as count FROM products');
+      const ordersCount = await client.query('SELECT COUNT(*) as count FROM orders');
+      const itemsCount = await client.query('SELECT COUNT(*) as count FROM order_items');
+
+      console.log(`----------------------------------------------------`);
+      console.log(`[Migration Seed Status]:`);
+      console.log(` - clients:     ${clientsCount.rows[0].count} rows`);
+      console.log(` - products:    ${productsCount.rows[0].count} rows`);
+      console.log(` - orders:      ${ordersCount.rows[0].count} rows`);
+      console.log(` - order_items: ${itemsCount.rows[0].count} rows`);
+      console.log(`====================================================`);
+      console.log(`[Migration] SUCCESS! Remote Supabase database is 100% ready.`);
     } catch (err: any) {
-      console.error(`[Migration Failed] ${err.message}`);
+      console.error(`====================================================`);
+      console.error(`[Migration FAILED] Detailed Error Information:`);
+      console.error(` - Message:  ${err.message}`);
+      if (err.code) console.error(` - Code:     ${err.code}`);
+      if (err.detail) console.error(` - Detail:   ${err.detail}`);
+      if (err.hint) console.error(` - Hint:     ${err.hint}`);
+      if (err.position) console.error(` - Position: ${err.position}`);
+      if (err.stack) console.error(` - Stack:\n${err.stack}`);
+      console.error(`====================================================`);
       process.exit(1);
     } finally {
-      client.release();
+      if (client) client.release();
       await pool.end();
     }
   } else {
@@ -61,7 +102,6 @@ async function runMigration() {
       db.pragma('journal_mode = WAL');
       db.pragma('foreign_keys = ON');
 
-      // En SQLite, reemplazar sintaxis Postgres si aplica
       const sqliteSql = sqlContent
         .replace(/TIMESTAMP WITH TIME ZONE/gi, 'TEXT')
         .replace(/NUMERIC\(\d+,\s*\d+\)/gi, 'REAL')
