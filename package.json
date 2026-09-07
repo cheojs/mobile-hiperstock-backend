@@ -1,14 +1,15 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "HiperStock Backend Offline-First Sync Service",
+  "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "clean": "rm -rf dist",
     "build": "tsc",
     "start": "node dist/server.js",
-    "migrate": "tsx src/scripts/migrate.ts",
-    "seed": "tsx src/scripts/migrate.ts",
+    "migrate": "node dist/scripts/migrate.js",
+    "seed": "node dist/scripts/migrate.js",
     "test": "jest --runInBand"
   },
   "keywords": [],
@@ -20,6 +21,8 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pg": "^8.23.0",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
     "uuid": "^14.0.2",
     "zod": "^4.5.4"
   },
@@ -34,8 +37,6 @@
     "@types/uuid": "^10.0.0",
     "jest": "^30.5.1",
     "supertest": "^7.2.2",
-    "ts-jest": "^29.4.12",
-    "tsx": "^4.23.13",
-    "typescript": "^5.9.3"
+    "ts-jest": "^29.4.12"
   }
 }
